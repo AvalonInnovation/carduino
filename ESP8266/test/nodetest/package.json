@@ -1,0 +1,17 @@
+{
+  "name": "nodetest",
+  "version": "1.0.0",
+  "description": "A test Websocket endpoint for ESP8266 transcievers",
+  "main": "mdns-test.js",
+  "dependencies": {
+    "mdns": "^2.3.3",
+    "multicast-dns": "^6.1.0",
+    "ws": "^1.1.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Erland Lewin <erland@lewin.nu>",
+  "license": "OSL-3.0"
+}
