@@ -1,4 +1,4 @@
-# ESP8266 Transcievers
+# SlotCarduino ESP8266 Transcievers
 
 The car and track boards have [Atmel](http://www.atmel.com) processors which
 communicate via serial ports.
@@ -6,15 +6,41 @@ communicate via serial ports.
 We will use ESP8266 WiFi boards to connect to the microcontroller serial port
 and then communicate information over WiFi.
 
-The ESP boards remember the SSID and password for the latest used WiFi network.
-If they fail to connect, they will create a new WiFi network, named "carduino-car-01"
-or similar. Joining that network and browsing to any web page will bring you
-to the configuration web site, where you can enter SSID and password for the 
-network that the cars should connect to.
+The ESP expects a 250 kbps serial connection.
 
-The ESP modules will register host names with mdns (like "carduino-car-01.local").
-They will then attempt to connect ot a websocket server running on the lost
-"carduino-master", port 80 (TBD: Can we have both web server and websocket 
-communication on the same port?).
+It waits for a string starting with `>>ID:` followed `<type>-<id>[:details]` 
+followed by `<<`.
 
-The plan is to have a JSON-style protocol between the cars and the master.
+The ESP responds with `OK\n` or `NOK\n<error>\n`. If the device gets NOK or 
+doesn't get OK in some timeout, the device should resend the ID string.
+
+When the ESP gets the ID, it attempts to connect to a WiFi network with the 
+previously settings for SSID and password. While it is doing this, it is 
+buffering data from the serial port (at most 1024 bytes).
+
+If it fails, it becomes an access point for a new WiFi network, called 
+`<type>-<id>` as received from the device. Connecting to this network, you 
+will get a web page where you can enter the SSID details.
+
+When it succeeds in connecting to the WiFi network, it registers its host 
+name as `<type>-<id>.local` with mdns.
+
+It uses mdns to look up the host carduino-master.local with mdns. If it fails, 
+it repeats this until it can resolve the host.
+
+Then it creates a websocket connection to carduino-master.local, port 80. It 
+will send `ID:<id>\n` as its first string on the websocket. 
+
+At this point, any data received on the serial port is sent to the web socket,
+and any data received on the web socket is sent to the serial port.
+
+If it loses the websocket connection, it should attempt to reconnect, and buffer
+serial data while it is doing so (not sure if this works now).
+
+If it loses the WiFi, it should attempt to re-connect.
+
+There are still bugs and crashes.
+
+There is a node-js program in the `test/nodetest` which registers as 
+`carduino-master.local` on mdns, and starts a websocket program, which can be
+used to test the ESP connections.
