@@ -2,7 +2,6 @@
 #include <WebSocketsClient.h>
 #include <WebSocketsServer.h>
 
-
 #include <WiFiManager.h>
 #include <WebSocketsClient.h>
 #include <ESP8266mDNS.h>
@@ -10,12 +9,6 @@
 // Protocol: First line on serial port starts with ">>", followed by ID, followed by "<<\n"
 // Transciever responds with OK\n or NOK\n. If NOK, client resends.
 // after that, all serial data is sent transparently
-
-// Identity is <type>-<id>[:programmer name:program name:program version]
-// For example track-1 or car-2-erl-gasenIBotten-0.4
-// ESP WiFi name will be the type-id part of the id
-
-// #define NAME "Carduino-Track-01"
 
 // For now Telnet doesn't work for unknown reasons. The telnetServer.hasClient() call never 
 // returns true
@@ -35,25 +28,14 @@
 // ESP8266 / WebSocket / UART transceiver
 
 typedef enum {
-  STATE_WIFI_WAIT_FOR_ID,      // 0
-  STATE_WIFI_CONNECT,              // 1
-  STATE_WIFI_REGISTER_MDNS,        // 2
-  STATE_WIFI_RESOLVE_MASTER,       // 3
-  STATE_WIFI_TELNET_SETUP,         // 4
-  STATE_WIFI_WEBSOCKET_CONNECT,    // 5
-  STATE_WIFI_WEBSOCKET_CONNECTING, // 6
-  STATE_WIFI_WEBSOCKET_SEND_ID,
-  STATE_WIFI_WEBSOCKET_RUNNING
+  STATE_WIFI_CONNECT,              // 0
+  STATE_WIFI_REGISTER_MDNS,        // 1
+  STATE_WIFI_RESOLVE_MASTER,       // 2
+  STATE_WIFI_TELNET_SETUP,         // 3
+  STATE_WIFI_WEBSOCKET_CONNECT,    // 4
+  STATE_WIFI_WEBSOCKET_CONNECTING, // 5
+  STATE_WIFI_WEBSOCKET_RUNNING     
 } WiFiState;
-
-typedef enum {
-  STATE_SERIAL_WAIT_PREAMBLE_1,  // 0
-  STATE_SERIAL_WAIT_PREAMBLE_2,  // 1
-  STATE_SERIAL_READING_ID,       // 2
-  STATE_SERIAL_BUFFERING,
-  STATE_SERIAL_SEND_BUFFER,
-  STATE_SERIAL_RUNNING
-} SerialState;
 
 /* 
  *  static function prototypes
@@ -70,10 +52,10 @@ static WiFiServer telnetServer(23);
 static WiFiClient serverClients[MAX_SRV_CLIENTS];
 
 WiFiState wifiState;
-SerialState serialState;
+// SerialState serialState;
 IPAddress master;
 int idLength;
-char id[ MAX_ID_LENGTH ];
+char id[ 13 ]; // mac
 int clientCount;
 char *idDetails;
 
@@ -89,10 +71,16 @@ void setup() {
   idLength = 0;
   id[idLength] = '\0';
   clientCount = 0;
+  byte mac[6];
+  
+  WiFi.macAddress( mac );
+
+  sprintf( id, "%02x%02x%02x%02x%02x%02x", mac[5], mac[4], mac[3], mac[2], mac[1], mac[0] );
   
   // put your setup code here, to run once:
-  Serial.begin(115200);  
-  debugPrintln("setup(): entering");
+  // Serial.begin(115200);  
+  Serial.begin(250000);  
+  // debugPrintln("setup(): entering");
 
   // Serial.begin(250000);  // Per wants 250 kbps
 
@@ -108,13 +96,13 @@ void setup() {
     //here  "AutoConnectAP"
     //and goes into a blocking loop awaiting configuration
 
-    wifiState = STATE_WIFI_WAIT_FOR_ID;
-    serialState = STATE_SERIAL_WAIT_PREAMBLE_1;
+    wifiState = STATE_WIFI_CONNECT;
+    // serialState = STATE_SERIAL_WAIT_PREAMBLE_1;
     
     webSocketClient.onEvent(webSocketEvent);
 
     //if you get here you have connected to the WiFi
-    debugPrintln("setup(): leaving");
+    // debugPrintln("setup(): leaving");
 }
 
 void debugPrintln( const char *string )
@@ -149,7 +137,7 @@ void webSocketEvent( WStype_t type, uint8_t * payload, size_t len )
             s = s + NAME;
             webSocketClient.sendTXT(s /* "Identify: " + NAME */ );
 #endif
-            wifiNextState( STATE_WIFI_WEBSOCKET_SEND_ID );
+            wifiNextState( STATE_WIFI_WEBSOCKET_RUNNING );
           }
           break;
           
@@ -269,8 +257,8 @@ static void processNewTelnetConnections()
       serverClient.stop();
     }
     
-    if( serialState == STATE_SERIAL_BUFFERING )
-      serialState = STATE_SERIAL_SEND_BUFFER;
+    // if( serialState == STATE_SERIAL_BUFFERING )
+    //  serialState = STATE_SERIAL_SEND_BUFFER;
   } // end of if( telnetServer.hasClients() ) ...
 }
 
@@ -295,11 +283,6 @@ void wifiDoStateMachine()
   
   switch( wifiState )
   {
-    case STATE_WIFI_WAIT_FOR_ID:
-      if( serialState >= STATE_SERIAL_BUFFERING )
-        wifiNextState( STATE_WIFI_CONNECT );
-      break;
-      
     case STATE_WIFI_CONNECT:
       // wait until we have the ID string from the serial port before doing auto-connect, so
       // we know what name to use for the AP.
@@ -311,6 +294,7 @@ void wifiDoStateMachine()
         //if it does not connect it starts an access point with the specified name
         //here  "AutoConnectAP"
         //and goes into a blocking loop awaiting configuration
+        // any ID goes here
         wifiManager.autoConnect( id );
       }
       wifiNextState( STATE_WIFI_REGISTER_MDNS );
@@ -356,24 +340,6 @@ void wifiDoStateMachine()
        processTelnetRx();
        break;
 
-    case STATE_WIFI_WEBSOCKET_SEND_ID:
-      // wait until we have received the ID on the serial port
-      // oh, no, another enum comparison! uck!
-      if( serialState >= STATE_SERIAL_BUFFERING )
-      {
-        char buf[ 256 ];
-
-        sprintf( buf, "ID:%s%s%s\n", id, (idDetails == NULL) ? "" : ":", (idDetails == NULL) ? "" : idDetails );
-        
-         webSocketClient.sendTXT( buf );
-
-         if( serialState == STATE_SERIAL_BUFFERING )
-           serialState = STATE_SERIAL_SEND_BUFFER;
-           
-         wifiNextState( STATE_WIFI_WEBSOCKET_RUNNING );
-      }
-      break;
-
      case STATE_WIFI_WEBSOCKET_RUNNING:
        // serialRxLoop();
        processNewTelnetConnections();
@@ -391,161 +357,9 @@ void wifiDoStateMachine()
 
 void serialDoStateMachine()
 {
-  static int postambleCount = 0;
-  static int preambleCount = 0;
-  // don't know why len has to be here
-  size_t len;
-  static int oldState = -1;
-
-  if( oldState != serialState )
+  if( hasWiFiClient() )
   {
-#if DEBUG
-    Serial.printf( "serialDoStateMachine: state %d -> %d\n", oldState, serialState );
-#endif
-    oldState = serialState;
-  }
-  
-  switch( serialState )
-  {
-    case STATE_SERIAL_WAIT_PREAMBLE_1:
-      if( Serial.available() )
-      {
-        char c;
-
-        c = Serial.read();
-        if( c == '>' )
-          serialState = STATE_SERIAL_WAIT_PREAMBLE_2;
-        else if( c == '<' )
-        {
-          if( postambleCount == 1 )
-          {
-            Serial.println( "NOK" );
-            postambleCount = 0;
-          }
-          else
-            postambleCount++;
-        }
-        else
-          postambleCount = 0;
-      }
-      break;
-
-    case STATE_SERIAL_WAIT_PREAMBLE_2:
-      if( Serial.available() )
-      {
-        char c;
-
-        c = Serial.read();
-        if( c == '>' )
-        {
-          idLength = 0;
-          serialState = STATE_SERIAL_READING_ID;
-        }
-        else if( c == '<' )
-        {
-          postambleCount = 1;
-          serialState =  STATE_SERIAL_WAIT_PREAMBLE_1;
-        }
-        else
-          serialState =  STATE_SERIAL_WAIT_PREAMBLE_1;
-      }
-      break;
-
-    case STATE_SERIAL_READING_ID:
-      while( Serial.available() && 
-             !(preambleCount == 2) && 
-             !(postambleCount == 2) && 
-             (serialState == STATE_SERIAL_READING_ID))
-      {
-        char c;
-        
-        c = Serial.read();
-
-        switch( c )
-        {
-          case '<':
-            postambleCount++;
-            break;
-
-          case '>':
-            preambleCount++;
-            if( idLength == MAX_ID_LENGTH )
-            {
-              serialNOK( "ID too long" );
-              continue;
-            }
-            if( postambleCount == 1 )
-            {
-              appendToID( '<' );
-              postambleCount = 0;  
-            }
-            appendToID( c );
-            break;
-              
-          default:
-            if( postambleCount == 1 )
-              appendToID( '<' );
-
-            postambleCount = 0;
-            preambleCount = 0;
-
-            appendToID( c );
-            
-            if( idLength == MAX_ID_LENGTH )
-              serialNOK( "ID too long" );
- 
-            break;
-        } // end of switch( c )
-      } // end of while loop
-
-      if( preambleCount == 2 )
-        idLength = 0;
-      else if( postambleCount == 2 )
-      {
-        char *colon;
-        
-        Serial.println( "OK" );
-
-        // parse ID. Split into two strings, id up to the first colon, and idDetails
-        // for stuff after the first colon.
-        // we want the first part in order to use it as AP name and host name
-        
-        // find first colon if any, replace with '\0', point idDetails to next char
-        colon = strchr( id, ':' );
-        if( colon == NULL )
-          idDetails = NULL;
-        else
-        {
-          idDetails = colon + 1;
-          *colon = '\0';
-        }
-        
-        serialState = STATE_SERIAL_BUFFERING;
-        serialBufferLength = 0;
-      }
-      break;
-
-    case STATE_SERIAL_BUFFERING:
-      // TODO: Detect preamble here
-      len = Serial.available();
-
-      if( len > 0 )
-      {
-        size_t readLen = min( len, sizeof( serialBuffer ) - serialBufferLength );
-        
-        Serial.readBytes(serialBuffer + serialBufferLength, readLen);
-
-        serialBufferLength += readLen;
-      }
-      break;
-
-    case STATE_SERIAL_SEND_BUFFER:
-      serialToWiFi( serialBuffer, serialBufferLength );
-      serialState = STATE_SERIAL_RUNNING;
-      break;
-    
-    case STATE_SERIAL_RUNNING:
-      len = Serial.available();
+      int len = Serial.available();
 
       if( len > 0 )
       {
@@ -554,7 +368,7 @@ void serialDoStateMachine()
     
         Serial.readBytes(sbuf, len);
 
-        debugPrintln( "serial running got data" );
+        // debugPrintln( "serial running got data" );
         
         if( wifiState == STATE_WIFI_WEBSOCKET_RUNNING )
           webSocketClient.sendBIN( sbuf, len );
@@ -568,9 +382,7 @@ void serialDoStateMachine()
           }
         }  
       }
-      // todo: look for preamble here?
-      break;
-  }
+  } // end of if( hasWiFiConnection() )
 }
 
 void serialToWiFi( char *buffer, size_t len )
@@ -589,22 +401,6 @@ void serialToWiFi( char *buffer, size_t len )
     }
   }
   
-}
-void appendToID( char c )
-{
-  if( idLength < MAX_ID_LENGTH )
-  {
-    id[ idLength ] = c;
-    idLength++;
-    id[ idLength ] = '\0';
-  }
-}
-
-void serialNOK( String errorMsg )
-{
-  Serial.print( "NOK\n" );
-  Serial.println( errorMsg );
-  serialState = STATE_SERIAL_WAIT_PREAMBLE_1;
 }
 
 static bool hasWiFiClient()
