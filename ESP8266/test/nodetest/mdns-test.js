@@ -82,6 +82,7 @@ wss = new WebSocketServer({ port: 80 });
 wss.on('connection', function connection(ws) {
 	device = { 'connection': ws };
 	devicesByConnection[ ws ] = device;
+	console.log( "Got connection." );
 
 	ws.on('message', function handleMessage(message) {
 		parseNetworkMessage( device, message );
@@ -111,6 +112,19 @@ function parseDevice( data )
     // ws.send( data );
 }
 
+function broadcastData( data )
+{
+    // console.log( "broadcastData( " + data + "): entering" );
+
+    for( var connection in devicesByConnection )
+    {
+	// console.log( "connection: " + JSON.stringify( connection ) );
+	devicesByConnection[ connection ][ 'connection' ].send( data );
+    }
+
+    // console.log( "broadcastData( " + data + "): leaving" );
+}
+
 function sendData( device, data )
 {
     device[ 'connection' ].send( data );
@@ -129,6 +143,8 @@ function parseNetworkMessage( device, message )
 	console.log( type + "-" + device[ 'id' ] + ": '" + message + "'" );
     else
     {
+	console.log( "Message: '" + message + "'" )
+	    /*
 	if( startsWith( message, "ID:" ) )
         {
 	    var restOfString;
@@ -159,10 +175,18 @@ function parseNetworkMessage( device, message )
 	}
 	else
 	    console.log( "Strange, message '" + message + "' doesn't start with ID:" );
+	    */
     }
 }
 
-rl.question('Send to what device (type-id):', parseDevice );
+function ask()
+{
+    rl.question( 'Enter data to send: ', function( message ) { broadcastData( message + "\n" ); ask(); } );
+}
+// rl.question( 'Enter data to send: ', function( message ) { broadcastData( message );  } );
+ask()
+
+// rl.question('Send to what device (type-id):', parseDevice );
 
 //(answer) => {
 	// TODO: Log the answer in a database
